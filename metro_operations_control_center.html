@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>METRO CENTRAL COMMAND - 捷運行控中心 5大主線動態虛擬儀表板</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Share+Tech+Mono&family=Noto+Sans+TC:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-dark: #050811;
+            --panel-bg: rgba(10, 15, 28, 0.85);
+            --panel-border: rgba(0, 243, 255, 0.22);
+            --cyan-glow: #00f3ff;
+            --red-line: #e60012;
+            --blue-line: #0070bd;
+            --orange-line: #f8931d;
+            --brown-line: #c48c31;
+            --green-line: #008659;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: #d1d5db;
+            font-family: 'Chakra Petch', 'Noto Sans TC', sans-serif;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(10, 25, 47, 0.6) 0%, rgba(5, 8, 17, 0.98) 100%),
+                linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+            background-size: 100% 100%, 25px 25px, 25px 25px;
+        }
+
+        .mono-font {
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        /* Glassmorphism Panel */
+        .hud-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.04), inset 0 0 15px rgba(0, 243, 255, 0.02);
+            backdrop-filter: blur(10px);
+            position: relative;
+            border-radius: 6px;
+        }
+
+        /* HUD Corner Accents */
+        .hud-panel::before, .hud-panel::after {
+            content: '';
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            border-color: var(--cyan-glow);
+            pointer-events: none;
+        }
+        .hud-panel::before {
+            top: -1px; left: -1px;
+            border-top: 2px solid var(--cyan-glow);
+            border-left: 2px solid var(--cyan-glow);
+        }
+        .hud-panel::after {
+            bottom: -1px; right: -1px;
+            border-bottom: 2px solid var(--cyan-glow);
+            border-right: 2px solid var(--cyan-glow);
+        }
+
+        /* Scanline Overlay */
+        .scanline-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.3) 50%);
+            background-size: 100% 4px;
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0.5;
+        }
+
+        /* Red Emergency Mode UI Flash */
+        body.emergency-mode {
+            --panel-border: rgba(255, 42, 109, 0.7);
+            --cyan-glow: #ff2a6d;
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(55, 10, 15, 0.8) 0%, rgba(15, 5, 5, 0.98) 100%),
+                linear-gradient(rgba(255, 42, 109, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 42, 109, 0.05) 1px, transparent 1px);
+        }
+
+        .blink {
+            animation: blinker 1s linear infinite;
+        }
+        @keyframes blinker {
+            50% { opacity: 0.15; }
+        }
+
+        .text-glow-cyan { text-shadow: 0 0 8px rgba(0, 243, 255, 0.6); }
+        .text-glow-red { text-shadow: 0 0 8px rgba(255, 42, 109, 0.8); }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: rgba(5, 8, 17, 0.8); }
+        ::-webkit-scrollbar-thumb { background: rgba(0, 243, 255, 0.3); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0, 243, 255, 0.8); }
+    </style>
+</head>
+<body class="min-h-screen p-2 md:p-3 text-xs md:text-sm flex flex-col justify-between select-none">
+
+    <!-- CRT Scanline Filter -->
+    <div id="scanline" class="scanline-overlay"></div>
+
+    <!-- TOP HEADER BAR -->
+    <header class="hud-panel p-2.5 mb-2.5 flex flex-wrap items-center justify-between gap-3 border-b-2 border-cyan-500/40">
+        <div class="flex items-center gap-3">
+            <div class="p-2 bg-cyan-950/80 border border-cyan-500/50 rounded flex items-center justify-center">
+                <i data-lucide="radio" class="w-6 h-6 text-cyan-400 animate-pulse"></i>
+            </div>
+            <div>
+                <h1 class="text-base md:text-xl font-bold tracking-wider text-cyan-400 text-glow-cyan flex items-center gap-2">
+                    台北捷運中央行控中心 <span class="text-xs px-2 py-0.5 bg-cyan-950 text-cyan-300 border border-cyan-500/40 rounded mono-font">TAIPEI METRO OCC v5.2</span>
+                </h1>
+                <p class="text-[10px] md:text-xs text-gray-400 tracking-widest uppercase mono-font">5-LINE INTEGRATED METROPOLITAN OPERATIONS CONTROL CENTER</p>
+            </div>
+        </div>
+
+        <!-- Center System Badges -->
+        <div class="hidden xl:flex items-center gap-3 mono-font text-xs">
+            <div class="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded border border-gray-800">
+                <span id="defcon-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-400 blink"></span>
+                <span class="text-gray-400">運轉狀態:</span>
+                <span id="defcon-status" class="text-emerald-400 font-bold">全線正常 (NORMAL)</span>
+            </div>
+            <div class="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded border border-gray-800">
+                <i data-lucide="train" class="w-4 h-4 text-cyan-400"></i>
+                <span class="text-gray-400">在線車輛:</span>
+                <span class="text-cyan-400 font-bold" id="active-trains-count">128 列</span>
+            </div>
+            <div class="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded border border-gray-800">
+                <i data-lucide="users" class="w-4 h-4 text-amber-400"></i>
+                <span class="text-gray-400">全網時流量:</span>
+                <span class="text-amber-400 font-bold" id="passenger-count">214,580 人/時</span>
+            </div>
+        </div>
+
+        <!-- Right Clock & Actions -->
+        <div class="flex items-center gap-2 md:gap-3 ml-auto sm:ml-0">
+            <div class="text-right px-3 py-1 bg-black/60 border border-cyan-900/60 rounded">
+                <div id="clock-time" class="text-lg md:text-2xl font-bold text-cyan-300 mono-font tracking-wider text-glow-cyan">00:00:00</div>
+                <div id="clock-date" class="text-[10px] text-gray-400 mono-font">2026-09-24 THU</div>
+            </div>
+
+            <div class="flex items-center gap-1.5">
+                <button id="btn-sound" onclick="toggleSound()" title="聲音提示" class="p-2 bg-gray-900/80 hover:bg-cyan-950 border border-cyan-800 text-cyan-400 rounded transition">
+                    <i data-lucide="volume-2" id="icon-sound" class="w-4 h-4"></i>
+                </button>
+                <button onclick="toggleScanline()" title="切換CRT螢幕濾鏡" class="p-2 bg-gray-900/80 hover:bg-cyan-950 border border-cyan-800 text-cyan-400 rounded transition">
+                    <i data-lucide="tv" class="w-4 h-4"></i>
+                </button>
+                <button id="btn-emergency" onclick="toggleEmergencyAlert()" class="px-3 py-2 bg-red-950/80 hover:bg-red-900 border border-red-600/80 text-red-200 font-bold rounded flex items-center gap-1.5 transition text-xs blink">
+                    <i data-lucide="alert-triangle" class="w-4 h-4 text-red-400"></i>
+                    <span>一級警戒</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT GRID -->
+    <main class="grid grid-cols-12 gap-2.5 flex-grow mb-2">
+
+        <!-- LEFT COLUMN: 5-Line Route Map + Fleet Table (8 Cols) -->
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-2.5">
+            
+            <!-- PANEL A: FULL 5-LINE SYSTEM ROUTE MAP -->
+            <section class="hud-panel p-2.5 flex-grow flex flex-col min-h-[360px]">
+                <div class="flex flex-wrap items-center justify-between pb-2 mb-2 border-b border-cyan-900/50 gap-2">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="map" class="w-4 h-4 text-cyan-400"></i>
+                        <h2 class="font-bold text-cyan-300 tracking-wide uppercase">台北捷運 5大主線全路網動態軌道圖</h2>
+                    </div>
+                    <!-- Line Legend -->
+                    <div class="flex flex-wrap items-center gap-2.5 text-[10px] mono-font">
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#e60012]"></span> 淡水信義(R)</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#0070bd]"></span> 板南線(BL)</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#f8931d]"></span> 中和新蘆(O)</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#c48c31]"></span> 文湖線(BR)</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#008659]"></span> 松山新店(G)</span>
+                    </div>
+                </div>
+
+                <!-- SVG Schematic Track Map -->
+                <div class="relative flex-grow bg-black/70 rounded border border-cyan-950 overflow-hidden flex items-center justify-center p-1">
+                    <svg id="metro-map" class="w-full h-full min-h-[290px]" viewBox="0 0 900 360" preserveAspectRatio="xMidYMid meet">
+                        <defs>
+                            <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(0, 243, 255, 0.04)" stroke-width="1"/>
+                            </pattern>
+                            <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
+                                <feGaussianBlur stdDeviation="2.5" result="blur" />
+                                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                            </filter>
+                        </defs>
+                        <rect width="100%" height="100%" fill="url(#grid)" />
+
+                        <!-- TRACK PATHS -->
+                        <!-- 1. Red Line (Tamsui-Xinyi): North to South-East -->
+                        <path d="M 80 40 L 320 40 L 450 170 L 450 280 L 780 280" fill="none" stroke="#e60012" stroke-width="4.5" stroke-linecap="round" opacity="0.85"/>
+                        
+                        <!-- 2. Blue Line (Bannan): West to East -->
+                        <path d="M 60 170 L 840 170" fill="none" stroke="#0070bd" stroke-width="4.5" stroke-linecap="round" opacity="0.85"/>
+                        
+                        <!-- 3. Orange Line (Zhonghe-Xinlu): North-West to South -->
+                        <path d="M 120 310 L 320 110 L 580 110 L 580 320" fill="none" stroke="#f8931d" stroke-width="4.5" stroke-linecap="round" opacity="0.85"/>
+
+                        <!-- 4. Green Line (Songshan-Xindian): North-East to South-West -->
+                        <path d="M 180 280 L 320 280 L 450 170 L 720 70" fill="none" stroke="#008659" stroke-width="4.5" stroke-linecap="round" opacity="0.85"/>
+
+                        <!-- 5. Brown Line (Wenhu): East Perimeter Curve (Medium Capacity) -->
+                        <path d="M 800 320 L 800 70 L 480 70" fill="none" stroke="#c48c31" stroke-width="3.5" stroke-dasharray="6,3" stroke-linecap="round" opacity="0.9"/>
+
+                        <!-- STATIONS & INTERCHANGES -->
+                        <!-- Interchanges (Major Hubs) -->
+                        <g class="hubs">
+                            <!-- Taipei Main Station (R / BL Interchange) -->
+                            <circle cx="320" cy="170" r="7" fill="#050811" stroke="#00f3ff" stroke-width="2.5" filter="url(#glow-cyan)"/>
+                            <text x="320" y="193" text-anchor="middle" fill="#00f3ff" font-size="10" font-weight="bold" class="mono-font">R10/BL12 台北車站</text>
+
+                            <!-- Zhongxiao Xinsheng (BL / O Interchange) -->
+                            <circle cx="450" cy="170" r="7" fill="#050811" stroke="#00f3ff" stroke-width="2.5" filter="url(#glow-cyan)"/>
+                            <text x="450" y="153" text-anchor="middle" fill="#00f3ff" font-size="10" font-weight="bold" class="mono-font">BL14/O07 忠孝新生</text>
+
+                            <!-- Songjiang Nanjing (G / O Interchange) -->
+                            <circle cx="450" cy="110" r="6" fill="#050811" stroke="#ffffff" stroke-width="2"/>
+                            <text x="450" y="96" text-anchor="middle" fill="#e2e8f0" font-size="9" class="mono-font">G15/O08 松江南京</text>
+
+                            <!-- Nanjing Fuxing (G / BR Interchange) -->
+                            <circle cx="580" cy="110" r="6" fill="#050811" stroke="#ffffff" stroke-width="2"/>
+                            <text x="580" y="96" text-anchor="middle" fill="#e2e8f0" font-size="9" class="mono-font">G16/BR11 南京復興</text>
+
+                            <!-- Daan (R / BR Interchange) -->
+                            <circle cx="580" cy="280" r="6" fill="#050811" stroke="#ffffff" stroke-width="2"/>
+                            <text x="580" y="300" text-anchor="middle" fill="#e2e8f0" font-size="9" class="mono-font">R05/BR09 大安</text>
+
+                            <!-- Nangang Exhib Center (BL / BR Interchange) -->
+                            <circle cx="800" cy="170" r="7" fill="#050811" stroke="#00f3ff" stroke-width="2.5"/>
+                            <text x="800" y="153" text-anchor="middle" fill="#00f3ff" font-size="10" font-weight="bold" class="mono-font">BL23/BR24 南港展覽館</text>
+                        </g>
+
+                        <!-- Terminal Stations Nodes -->
+                        <g class="terminals" fill="#d1d5db" font-size="8" class="mono-font">
+                            <circle cx="80" cy="40" r="4" fill="#e60012"/><text x="80" y="30" text-anchor="middle">R28 淡水</text>
+                            <circle cx="780" cy="280" r="4" fill="#e60012"/><text x="780" y="300" text-anchor="middle">R02 象山</text>
+
+                            <circle cx="60" cy="170" r="4" fill="#0070bd"/><text x="60" y="190" text-anchor="middle">BL01 頂埔</text>
+
+                            <circle cx="120" cy="310" r="4" fill="#f8931d"/><text x="120" y="330" text-anchor="middle">O01 迴龍</text>
+                            <circle cx="580" cy="320" r="4" fill="#f8931d"/><text x="580" y="340" text-anchor="middle">O19 南勢角</text>
+
+                            <circle cx="180" cy="280" r="4" fill="#008659"/><text x="180" y="300" text-anchor="middle">G01 新店</text>
+                            <circle cx="720" cy="70" r="4" fill="#008659"/><text x="720" y="58" text-anchor="middle">G19 松山</text>
+
+                            <circle cx="800" cy="320" r="4" fill="#c48c31"/><text x="800" y="340" text-anchor="middle">BR01 動物園</text>
+                        </g>
+
+                        <!-- DYNAMIC TRAIN BLIPS -->
+                        <g id="train-blips">
+                            <!-- Red Line Train -->
+                            <g id="blip-R">
+                                <circle cx="200" cy="40" r="5" fill="#e60012" class="blink"/>
+                                <rect x="180" y="48" width="45" height="13" rx="2" fill="rgba(5,8,17,0.9)" stroke="#e60012" stroke-width="1"/>
+                                <text x="2025" y="58" text-anchor="middle" fill="#ffffff" font-size="8" class="mono-font">R-101 75km/h</text>
+                            </g>
+                            <!-- Blue Line Train -->
+                            <g id="blip-BL">
+                                <circle cx="240" cy="170" r="5" fill="#0070bd" class="blink"/>
+                                <rect x="220" y="146" width="45" height="13" rx="2" fill="rgba(5,8,17,0.9)" stroke="#0070bd" stroke-width="1"/>
+                                <text x="2425" y="156" text-anchor="middle" fill="#ffffff" font-size="8" class="mono-font">BL-205 64km/h</text>
+                            </g>
+                            <!-- Orange Line Train -->
+                            <g id="blip-O">
+                                <circle cx="220" cy="210" r="5" fill="#f8931d" class="blink"/>
+                                <rect x="200" y="222" width="45" height="13" rx="2" fill="rgba(5,8,17,0.9)" stroke="#f8931d" stroke-width="1"/>
+                                <text x="2225" y="232" text-anchor="middle" fill="#ffffff" font-size="8" class="mono-font">O-301 58km/h</text>
+                            </g>
+                            <!-- Green Line Train -->
+                            <g id="blip-G">
+                                <circle cx="600" cy="120" r="5" fill="#008659" class="blink"/>
+                                <rect x="580" y="132" width="45" height="13" rx="2" fill="rgba(5,8,17,0.9)" stroke="#008659" stroke-width="1"/>
+                                <text x="6025" y="142" text-anchor="middle" fill="#ffffff" font-size="8" class="mono-font">G-503 68km/h</text>
+                            </g>
+                            <!-- Brown Line Train (Auto) -->
+                            <g id="blip-BR">
+                                <circle cx="800" cy="220" r="5" fill="#c48c31" class="blink"/>
+                                <rect x="810" y="214" width="50" height="13" rx="2" fill="rgba(5,8,17,0.9)" stroke="#c48c31" stroke-width="1"/>
+                                <text x="835" y="224" text-anchor="middle" fill="#ffffff" font-size="8" class="mono-font">BR-402 (AUTO)</text>
+                            </g>
+                        </g>
+                    </svg>
+
+                    <!-- Overlay Status Pin -->
+                    <div class="absolute bottom-2 left-2 bg-black/80 px-2.5 py-1 rounded border border-cyan-800 text-[10px] mono-font flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+                        全網 5大路線自動號誌 (CBTC / ATC) 聯鎖同步中
+                    </div>
+                </div>
+            </section>
+
+            <!-- PANEL B: 5-LINE OPERATIONAL OVERVIEW CARDS -->
+            <section class="hud-panel p-2.5">
+                <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-cyan-900/50">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="layers" class="w-4 h-4 text-cyan-400"></i>
+                        <h2 class="font-bold text-cyan-300 tracking-wide uppercase">五線即時營運指標 (5-Line Real-Time Status)</h2>
+                    </div>
+                    <span class="text-[10px] text-gray-400 mono-font">LIVE SYNC: 1.0s</span>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 text-[11px] mono-font">
+                    <!-- Red Line Card -->
+                    <div class="p-2 bg-black/50 rounded border-l-4 border-[#e60012] border-y border-r border-gray-800">
+                        <div class="font-bold text-[#e60012] flex items-center justify-between">
+                            <span>淡水信義線</span> <span class="text-[9px] bg-red-950 text-red-300 px-1 rounded">R</span>
+                        </div>
+                        <div class="mt-1 text-gray-300">班距: <span class="text-white font-bold">3.5分</span></div>
+                        <div class="text-gray-300">在線: <span class="text-cyan-400 font-bold">32列</span></div>
+                        <div class="text-gray-300">號誌: <span class="text-emerald-400 font-bold">NORMAL</span></div>
+                    </div>
+
+                    <!-- Blue Line Card -->
+                    <div class="p-2 bg-black/50 rounded border-l-4 border-[#0070bd] border-y border-r border-gray-800">
+                        <div class="font-bold text-[#0070bd] flex items-center justify-between">
+                            <span>板南線</span> <span class="text-[9px] bg-blue-950 text-blue-300 px-1 rounded">BL</span>
+                        </div>
+                        <div class="mt-1 text-gray-300">班距: <span class="text-white font-bold">2.8分</span></div>
+                        <div class="text-gray-300">在線: <span class="text-cyan-400 font-bold">36列</span></div>
+                        <div class="text-gray-300">號誌: <span class="text-emerald-400 font-bold">NORMAL</span></div>
+                    </div>
+
+                    <!-- Orange Line Card -->
+                    <div class="p-2 bg-black/50 rounded border-l-4 border-[#f8931d] border-y border-r border-gray-800">
+                        <div class="font-bold text-[#f8931d] flex items-center justify-between">
+                            <span>中和新蘆線</span> <span class="text-[9px] bg-amber-950 text-amber-300 px-1 rounded">O</span>
+                        </div>
+                        <div class="mt-1 text-gray-300">班距: <span class="text-white font-bold">4.0分</span></div>
+                        <div class="text-gray-300">在線: <span class="text-cyan-400 font-bold">28列</span></div>
+                        <div class="text-gray-300">號誌: <span class="text-emerald-400 font-bold">NORMAL</span></div>
+                    </div>
+
+                    <!-- Green Line Card -->
+                    <div class="p-2 bg-black/50 rounded border-l-4 border-[#008659] border-y border-r border-gray-800">
+                        <div class="font-bold text-[#008659] flex items-center justify-between">
+                            <span>松山新店線</span> <span class="text-[9px] bg-emerald-950 text-emerald-300 px-1 rounded">G</span>
+                        </div>
+                        <div class="mt-1 text-gray-300">班距: <span class="text-white font-bold">4.2分</span></div>
+                        <div class="text-gray-300">在線: <span class="text-cyan-400 font-bold">20列</span></div>
+                        <div class="text-gray-300">號誌: <span class="text-emerald-400 font-bold">NORMAL</span></div>
+                    </div>
+
+                    <!-- Brown Line Card -->
+                    <div class="p-2 bg-black/50 rounded border-l-4 border-[#c48c31] border-y border-r border-gray-800">
+                        <div class="font-bold text-[#c48c31] flex items-center justify-between">
+                            <span>文湖線</span> <span class="text-[9px] bg-yellow-950 text-yellow-300 px-1 rounded">BR</span>
+                        </div>
+                        <div class="mt-1 text-gray-300">班距: <span class="text-white font-bold">2.5分</span></div>
+                        <div class="text-gray-300">在線: <span class="text-cyan-400 font-bold">14列</span></div>
+                        <div class="text-gray-300">號誌: <span class="text-emerald-400 font-bold">AUTO-DRIVE</span></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PANEL C: FLEET DISPATCH TABLE (Covering 5 Lines) -->
+            <section class="hud-panel p-2.5">
+                <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-cyan-900/50">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="list-tree" class="w-4 h-4 text-cyan-400"></i>
+                        <h2 class="font-bold text-cyan-300 tracking-wide uppercase">重點列車巡檢與負載狀況 (Fleet Dispatch Matrix)</h2>
+                    </div>
+                    <span class="text-[10px] text-gray-400 mono-font">DYNAMIC UPDATE</span>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse mono-font text-[11px]">
+                        <thead>
+                            <tr class="border-b border-gray-800 text-gray-400 bg-cyan-950/30">
+                                <th class="p-1.5">列車 ID</th>
+                                <th class="p-1.5">所屬路線</th>
+                                <th class="p-1.5">駕駛員/模式</th>
+                                <th class="p-1.5">時速</th>
+                                <th class="p-1.5">下一站</th>
+                                <th class="p-1.5">準點誤差</th>
+                                <th class="p-1.5">車廂擁擠度</th>
+                                <th class="p-1.5 text-center">車門</th>
+                            </tr>
+                        </thead>
+                        <tbody id="train-table-body" class="divide-y divide-gray-800/60">
+                            <!-- JS Dyn Populated Rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- RIGHT COLUMN: Power Grid, CCTV, System Logs & Dispatch (4 Cols) -->
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-2.5">
+
+            <!-- PANEL D: HIGH VOLTAGE POWER & TUNNEL SENSORS -->
+            <section class="hud-panel p-2.5">
+                <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-cyan-900/50">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="zap" class="w-4 h-4 text-amber-400"></i>
+                        <h2 class="font-bold text-cyan-300 tracking-wide uppercase">高壓供電與隧道環境 (Power Grid)</h2>
+                    </div>
+                    <span class="text-[10px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800">750V DC / 22KV AC</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 text-[11px] mono-font">
+                    <div class="p-2 bg-black/40 rounded border border-gray-800">
+                        <div class="text-gray-400 mb-0.5">主變電站總電壓</div>
+                        <div class="text-base font-bold text-amber-400 flex items-baseline justify-between">
+                            <span id="val-voltage">748.5</span> <span class="text-xs font-normal text-gray-500">V</span>
+                        </div>
+                        <div class="w-full bg-gray-800 h-1 mt-1 rounded-full overflow-hidden">
+                            <div id="bar-voltage" class="bg-amber-400 h-full transition-all duration-300" style="width: 86%"></div>
+                        </div>
+                    </div>
+
+                    <div class="p-2 bg-black/40 rounded border border-gray-800">
+                        <div class="text-gray-400 mb-0.5">隧道通風系統風量</div>
+                        <div class="text-base font-bold text-cyan-400 flex items-baseline justify-between">
+                            <span id="val-air">98.2</span> <span class="text-xs font-normal text-gray-500">%</span>
+                        </div>
+                        <div class="w-full bg-gray-800 h-1 mt-1 rounded-full overflow-hidden">
+                            <div id="bar-air" class="bg-cyan-400 h-full transition-all duration-300" style="width: 98%"></div>
+                        </div>
+                    </div>
+
+                    <div class="p-2 bg-black/40 rounded border border-gray-800">
+                        <div class="text-gray-400 mb-0.5">全線鋼軌溫度</div>
+                        <div class="text-base font-bold text-emerald-400 flex items-baseline justify-between">
+                            <span id="val-temp">28.2</span> <span class="text-xs font-normal text-gray-500">°C</span>
+                        </div>
+                    </div>
+
+                    <div class="p-2 bg-black/40 rounded border border-gray-800">
+                        <div class="text-gray-400 mb-0.5">全路網總負載</div>
+                        <div class="text-base font-bold text-cyan-300 flex items-baseline justify-between">
+                            <span id="val-load">114.8</span> <span class="text-xs font-normal text-gray-500">MW</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PANEL E: CCTV SECURITY MATRIX -->
+            <section class="hud-panel p-2.5">
+                <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-cyan-900/50">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="video" class="w-4 h-4 text-cyan-400"></i>
+                        <h2 class="font-bold text-cyan-300 tracking-wide uppercase">即時 CCTV 畫面監視</h2>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="switchCam(1)" class="px-1.5 py-0.5 text-[10px] bg-cyan-950 hover:bg-cyan-800 border border-cyan-700 rounded text-cyan-300">CAM-1</button>
+                        <button onclick="switchCam(2)" class="px-1.5 py-0.5 text-[10px] bg-cyan-950 hover:bg-cyan-800 border border-cyan-700 rounded text-cyan-300">CAM-2</button>
+                    </div>
+                </div>
+
+                <div class="relative bg-black h-32 rounded overflow-hidden border border-gray-800 flex items-center justify-center">
+                    <canvas id="cctv-canvas" class="w-full h-full"></canvas>
+                    
+                    <div class="absolute top-2 left-2 text-[10px] font-mono text-emerald-400 bg-black/75 px-1.5 py-0.5 rounded border border-emerald-900/80 flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-red-600 animate-ping"></span>
+                        <span id="cctv-label">CAM-01: 台北車站 (R/BL轉乘月台)</span>
+                    </div>
+                    <div class="absolute bottom-2 right-2 text-[9px] font-mono text-gray-400 bg-black/70 px-1 py-0.5 rounded">
+                        HD LIVE ● 1080P 30FPS
+                    </div>
+                </div>
+            </section>
+
+            <!-- PANEL F: SYSTEM LOG & EVENT TERMINAL -->
+            <section class="hud-panel p-2.5 flex-grow flex flex-col">
+                <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-cyan-900/50">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="terminal" class="w-4 h-4 text-cyan-400"></i>
+                        <h2 class="font-bold text-cyan-300 tracking-wide uppercase">行控通訊與事件日誌 (Event Log)</h2>
+                    </div>
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 blink"></span>
+                </div>
+
+                <div id="log-container" class="bg-black/70 border border-cyan-950 rounded p-2 text-[11px] mono-font h-36 overflow-y-auto space-y-1.5 flex-grow">
+                    <!-- Logs inserted dynamically -->
+                </div>
+            </section>
+
+            <!-- PANEL G: INTERACTIVE MOVIE DISPATCH CONTROLS -->
+            <section class="hud-panel p-2.5 border-t-2 border-amber-500/50">
+                <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-cyan-900/50">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="shield-alert" class="w-4 h-4 text-amber-400"></i>
+                        <h2 class="font-bold text-amber-300 tracking-wide uppercase">指揮官調度控制台 (Commander Prop Controls)</h2>
+                    </div>
+                    <span class="text-[10px] text-amber-400/80 mono-font">ACTOR INTERACT</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="triggerEmergencyBrake()" class="p-2 bg-red-950/50 hover:bg-red-900/80 border border-red-600/80 rounded text-red-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95">
+                        <i data-lucide="octagon-pause" class="w-3.5 h-3.5"></i>
+                        <span>全線緊急煞車</span>
+                    </button>
+                    <button onclick="triggerSignalError()" class="p-2 bg-amber-950/50 hover:bg-amber-900/80 border border-amber-600/80 rounded text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95">
+                        <i data-lucide="wifi-off" class="w-3.5 h-3.5"></i>
+                        <span>模擬訊號異常</span>
+                    </button>
+                    <button onclick="triggerTyphoonMode()" class="p-2 bg-cyan-950/50 hover:bg-cyan-900/80 border border-cyan-600/80 rounded text-cyan-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95">
+                        <i data-lucide="wind" class="w-3.5 h-3.5"></i>
+                        <span>颱風強風減速</span>
+                    </button>
+                    <button onclick="resetSystem()" class="p-2 bg-gray-900/80 hover:bg-gray-800 border border-gray-700 rounded text-gray-300 text-xs flex items-center justify-center gap-1.5 transition active:scale-95">
+                        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+                        <span>重置系統數據</span>
+                    </button>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- FOOTER TAPE -->
+    <footer class="hud-panel px-3 py-1.5 flex items-center justify-between text-[11px] mono-font text-gray-400">
+        <div class="flex items-center gap-4">
+            <span class="flex items-center gap-1 text-cyan-400"><span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span> OCC SECURE NETWORK: ONLINE</span>
+            <span class="hidden sm:inline">5-LINE INTEGRATION ACTIVE</span>
+        </div>
+        <div>METRO FILM PROP SIMULATION &copy; 2026 HOLLYWOOD VISUAL FX DEPT.</div>
+    </footer>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // Web Audio API Sound Synthesizer
+        let audioCtx = null;
+        let soundEnabled = true;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playBeep(freq = 880, type = 'sine', duration = 0.08) {
+            if (!soundEnabled) return;
+            try {
+                initAudio();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) { console.log(e); }
+        }
+
+        function playAlarmSound() {
+            if (!soundEnabled) return;
+            playBeep(440, 'sawtooth', 0.2);
+            setTimeout(() => playBeep(880, 'sawtooth', 0.2), 180);
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const icon = document.getElementById('icon-sound');
+            if (soundEnabled) {
+                icon.setAttribute('data-lucide', 'volume-2');
+                addLog('語音與音效提醒已啟動', 'INFO');
+                playBeep(1200, 'sine', 0.1);
+            } else {
+                icon.setAttribute('data-lucide', 'volume-x');
+                addLog('語音提示已靜音', 'WARN');
+            }
+            lucide.createIcons();
+        }
+
+        function toggleScanline() {
+            const el = document.getElementById('scanline');
+            el.classList.toggle('hidden');
+            playBeep(600, 'sine', 0.05);
+        }
+
+        // Clock Update
+        function updateClock() {
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0];
+            const dateStr = now.toISOString().split('T')[0] + ' ' + ['SUN','MON','TUE','WED','THU','FRI','SAT'][now.getDay()];
+            document.getElementById('clock-time').textContent = timeStr;
+            document.getElementById('clock-date').textContent = dateStr;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // 5-Line Train Data Fleet Model
+        const trainFleet = [
+            { id: 'R101', line: '淡水信義線', lineCode: 'R', driver: '陳大為', speed: 75, next: '圓山', delta: '+0s', load: '65%', door: '關閉', mode: 'AUTO' },
+            { id: 'BL205', line: '板南線', lineCode: 'BL', driver: '林志豪', speed: 64, next: '忠孝新生', delta: '-15s', load: '88%', door: '關閉', mode: 'AUTO' },
+            { id: 'O301', line: '中和新蘆線', lineCode: 'O', driver: '張雅婷', speed: 58, next: '松江南京', delta: '+5s', load: '42%', door: '關閉', mode: 'AUTO' },
+            { id: 'BR402', line: '文湖線', lineCode: 'BR', driver: '無人駕駛', speed: 45, next: '南京復興', delta: '+0s', load: '70%', door: '關閉', mode: 'CBTC-DRIVERLESS' },
+            { id: 'G503', line: '松山新店線', lineCode: 'G', driver: '王建國', speed: 68, next: '中山', delta: '-5s', load: '52%', door: '關閉', mode: 'AUTO' },
+            { id: 'R112', line: '淡水信義線', lineCode: 'R', driver: '許美玲', speed: 0, next: '台北車站', delta: '+0s', load: '92%', door: '開啟中', mode: 'AUTO' },
+            { id: 'BL218', line: '板南線', lineCode: 'BL', driver: '黃家豪', speed: 70, next: '市政府', delta: '+10s', load: '78%', door: '關閉', mode: 'MANUAL' }
+        ];
+
+        function renderTrainTable() {
+            const tbody = document.getElementById('train-table-body');
+            tbody.innerHTML = '';
+
+            trainFleet.forEach(t => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-cyan-950/40 transition";
+
+                if (t.speed > 0) {
+                    t.speed = Math.max(15, Math.min(80, t.speed + Math.floor(Math.random() * 5 - 2)));
+                }
+
+                let badgeColor = 'bg-red-950 text-red-300 border-red-800';
+                if (t.lineCode === 'BL') badgeColor = 'bg-blue-950 text-blue-300 border-blue-800';
+                if (t.lineCode === 'O') badgeColor = 'bg-amber-950 text-amber-300 border-amber-800';
+                if (t.lineCode === 'BR') badgeColor = 'bg-yellow-950 text-yellow-300 border-yellow-800';
+                if (t.lineCode === 'G') badgeColor = 'bg-emerald-950 text-emerald-300 border-emerald-800';
+
+                const deltaColor = t.delta.startsWith('-') ? 'text-red-400' : 'text-emerald-400';
+
+                tr.innerHTML = `
+                    <td class="p-1.5 font-bold text-cyan-300">${t.id}</td>
+                    <td class="p-1.5"><span class="px-1.5 py-0.5 rounded border text-[10px] ${badgeColor}">${t.line}</span></td>
+                    <td class="p-1.5 text-gray-300">${t.driver}</td>
+                    <td class="p-1.5 text-amber-300 font-bold">${t.speed} km/h</td>
+                    <td class="p-1.5 text-gray-300">${t.next}</td>
+                    <td class="p-1.5 font-bold ${deltaColor}">${t.delta}</td>
+                    <td class="p-1.5 text-gray-300">${t.load}</td>
+                    <td class="p-1.5 text-center">${t.door === '開啟中' ? '<span class="text-amber-400 blink">● 開啟</span>' : '<span class="text-gray-400">● 關閉</span>'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        setInterval(renderTrainTable, 1200);
+        renderTrainTable();
+
+        // System Log Functions
+        function addLog(msg, type = 'INFO') {
+            const container = document.getElementById('log-container');
+            const time = new Date().toTimeString().split(' ')[0];
+            const div = document.createElement('div');
+
+            let colorClass = 'text-cyan-300';
+            if (type === 'WARN') colorClass = 'text-amber-400';
+            if (type === 'ALERT') colorClass = 'text-red-400 font-bold';
+
+            div.className = `${colorClass} flex gap-2 items-start`;
+            div.innerHTML = `<span class="text-gray-500">[${time}]</span> <span>${msg}</span>`;
+
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+            playBeep(1000, 'sine', 0.03);
+        }
+
+        addLog('台北捷運五大主線 (R, BL, O, BR, G) 系統同步完成。');
+        addLog('文湖線全自動駕駛 (CBTC Driverless) 聯鎖系統運作正常。');
+
+        const randomEvents = [
+            'R101 抵達 圓山站 (月台門解鎖完成)',
+            'BL205 通過 忠孝新生站 (流量感測 normal)',
+            'O301 中和新蘆線 變電站電壓平穩 (748V)',
+            'BR402 文湖線 無人駕駛車輛車廂空調調節 24°C',
+            'G503 松山新店線 中山站 轉乘通道人流暢通'
+        ];
+        setInterval(() => {
+            if (Math.random() > 0.45) {
+                const randEvt = randomEvents[Math.floor(Math.random() * randomEvents.length)];
+                addLog(randEvt, 'INFO');
+            }
+        }, 3000);
+
+        // Sensor Fluctuations
+        setInterval(() => {
+            document.getElementById('val-voltage').textContent = (745 + Math.random() * 5).toFixed(1);
+            document.getElementById('val-air').textContent = (97 + Math.random() * 2).toFixed(1);
+            document.getElementById('val-temp').textContent = (28 + Math.random() * 0.6).toFixed(1);
+
+            const passEl = document.getElementById('passenger-count');
+            let currentPass = parseInt(passEl.textContent.replace(/,/g, ''));
+            currentPass += Math.floor(Math.random() * 18 - 6);
+            passEl.textContent = currentPass.toLocaleString() + ' 人/時';
+        }, 1500);
+
+        // Emergency Mode Toggle
+        let isEmergency = false;
+        function toggleEmergencyAlert() {
+            isEmergency = !isEmergency;
+            const body = document.body;
+            const defcon = document.getElementById('defcon-status');
+            const dot = document.getElementById('defcon-dot');
+
+            if (isEmergency) {
+                body.classList.add('emergency-mode');
+                defcon.textContent = '一級防災戒嚴 (EMERGENCY)';
+                defcon.className = 'text-red-500 font-bold blink';
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-red-500 blink';
+                addLog('⚠️ 全線進入一級防災應變模式 (RED ALERT)！', 'ALERT');
+                playAlarmSound();
+            } else {
+                body.classList.remove('emergency-mode');
+                defcon.textContent = '全線正常 (NORMAL)';
+                defcon.className = 'text-emerald-400 font-bold';
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 blink';
+                addLog('防災戒嚴解除，全路網恢復正常調度。', 'INFO');
+                playBeep(880, 'sine', 0.1);
+            }
+        }
+
+        // Movie Interactive Trigger Buttons
+        function triggerEmergencyBrake() {
+            addLog('🛑 指揮官觸發：全路網 5大路線所有列車實施緊急煞車！', 'ALERT');
+            playAlarmSound();
+            trainFleet.forEach(t => t.speed = 0);
+            renderTrainTable();
+        }
+
+        function triggerSignalError() {
+            addLog('⚠️ 警告：中和新蘆線 (O) 與 文湖線 (BR) 自動號誌傳輸微幅延遲！', 'WARN');
+            playAlarmSound();
+        }
+
+        function triggerTyphoonMode() {
+            addLog('🌀 指揮官指令：啟動颱風防風預警，全高架路段 (文湖線/淡水高架) 實施降速營運。', 'WARN');
+            playBeep(700, 'triangle', 0.15);
+            trainFleet.forEach(t => {
+                if (t.lineCode === 'BR' || t.lineCode === 'R') t.speed = Math.min(t.speed, 30);
+            });
+            renderTrainTable();
+        }
+
+        function resetSystem() {
+            document.getElementById('log-container').innerHTML = '';
+            addLog('系統日誌與參數已成功重置。', 'INFO');
+            playBeep(1000, 'sine', 0.1);
+        }
+
+        // CCTV Camera Canvas Simulator
+        const canvas = document.getElementById('cctv-canvas');
+        const ctx = canvas.getContext('2d');
+        let currentCamMode = 1;
+
+        function switchCam(mode) {
+            currentCamMode = mode;
+            document.getElementById('cctv-label').textContent = mode === 1 ? 'CAM-01: 台北車站 (R/BL轉乘月台)' : 'CAM-08: 南京復興 (BR/G轉乘通道)';
+            addLog(`CCTV 監視切換至 CAM-0${mode}`, 'INFO');
+        }
+
+        function drawCCTV() {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+
+            ctx.fillStyle = '#050a0f';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = 'rgba(0, 243, 255, 0.2)';
+            ctx.lineWidth = 1;
+
+            if (currentCamMode === 1) {
+                ctx.beginPath();
+                ctx.moveTo(0, canvas.height * 0.75);
+                ctx.lineTo(canvas.width, canvas.height * 0.75);
+                ctx.moveTo(canvas.width * 0.3, 0);
+                ctx.lineTo(canvas.width * 0.3, canvas.height * 0.75);
+                ctx.stroke();
+
+                ctx.fillStyle = 'rgba(5, 255, 161, 0.5)';
+                const time = Date.now() * 0.002;
+                for (let i = 0; i < 6; i++) {
+                    let x = (canvas.width * 0.35) + (i * 22) + Math.sin(time + i) * 8;
+                    ctx.beginPath();
+                    ctx.arc(x, canvas.height * 0.7, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } else {
+                ctx.beginPath();
+                ctx.rect(canvas.width * 0.2, canvas.height * 0.2, canvas.width * 0.6, canvas.height * 0.6);
+                ctx.moveTo(0, 0); ctx.lineTo(canvas.width * 0.2, canvas.height * 0.2);
+                ctx.moveTo(canvas.width, 0); ctx.lineTo(canvas.width * 0.8, canvas.height * 0.2);
+                ctx.stroke();
+            }
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 16) {
+                if (Math.random() > 0.91) {
+                    data[i] = 255; data[i+1] = 255; data[i+2] = 255;
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+
+            requestAnimationFrame(drawCCTV);
+        }
+        drawCCTV();
+
+        // Animated Train Blips logic for 5 lines
+        let posR = 200, posBL = 240, posO = 220, posG = 600, posBR = 220;
+
+        function animateTrains() {
+            // Move Red
+            posR += 0.35; if (posR > 750) posR = 90;
+            const bR = document.getElementById('blip-R');
+            if (bR) bR.setAttribute('transform', `translate(${posR - 200}, 0)`);
+
+            // Move Blue
+            posBL += 0.45; if (posBL > 820) posBL = 70;
+            const bBL = document.getElementById('blip-BL');
+            if (bBL) bBL.setAttribute('transform', `translate(${posBL - 240}, 0)`);
+
+            // Move Green
+            posG -= 0.3; if (posG < 200) posG = 700;
+            const bG = document.getElementById('blip-G');
+            if (bG) bG.setAttribute('transform', `translate(${posG - 600}, 0)`);
+
+            requestAnimationFrame(animateTrains);
+        }
+
+        window.onload = function() {
+            lucide.createIcons();
+            animateTrains();
+        };
+    </script>
+</body>
+</html>
